@@ -1,5 +1,7 @@
 const transactionModel = require("../models/transaction.model")
+const ledgerModel = require("../models/ledger.model")
 const accountModel = require("../models/account.model")
+const emailService = require("../services/email.service")
 const mongoose = require("mongoose")
 
 async function createTransaction(req, res) {
@@ -77,7 +79,7 @@ async function createTransaction(req, res) {
     }
 
     /**
-     * 4. Derive sender balance from ledger
+     * 4. Derive sender balance
      */
     const balance = await fromUserAccount.getBalance()
 
@@ -91,15 +93,12 @@ async function createTransaction(req, res) {
 
     try {
 
-        /**
-         * 5. Start MongoDB session
-         */
         const session = await mongoose.startSession()
 
         session.startTransaction()
 
         /**
-         * 6. Create PENDING transaction
+         * 5. Create PENDING transaction
          */
         transaction = (await transactionModel.create([
             {
@@ -111,6 +110,42 @@ async function createTransaction(req, res) {
             }
         ], { session }))[0]
 
+        /**
+         * 6. Create DEBIT ledger entry
+         */
+        await ledgerModel.create([
+            {
+                account: fromAccount,
+                amount: amount,
+                transaction: transaction._id,
+                type: "DEBIT"
+            }
+        ], { session })
+
+        /**
+         * 7. Create CREDIT ledger entry
+         */
+        await ledgerModel.create([
+            {
+                account: toAccount,
+                amount: amount,
+                transaction: transaction._id,
+                type: "CREDIT"
+            }
+        ], { session })
+
+        /**
+         * 8. Mark transaction COMPLETED
+         */
+        await transactionModel.findOneAndUpdate(
+            { _id: transaction._id },
+            { status: "COMPLETED" },
+            { session }
+        )
+
+        /**
+         * 9. Commit MongoDB transaction
+         */
         await session.commitTransaction()
 
         session.endSession()
@@ -122,8 +157,18 @@ async function createTransaction(req, res) {
         })
     }
 
+    /**
+     * 10. Send email notification
+     */
+    await emailService.sendTransactionEmail(
+        req.user.email,
+        req.user.name,
+        amount,
+        toAccount
+    )
+
     return res.status(201).json({
-        message: "Transaction created successfully",
+        message: "Transaction completed successfully",
         transaction: transaction
     })
 }
