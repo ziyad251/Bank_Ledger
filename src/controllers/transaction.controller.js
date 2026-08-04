@@ -1,11 +1,14 @@
+const transactionModel = require("../models/transaction.model")
 const accountModel = require("../models/account.model")
 
 /**
  * Create a new transaction
- * POST /api/transactions
  */
 async function createTransaction(req, res) {
 
+    /**
+     * 1. Validate request
+     */
     const { fromAccount, toAccount, amount, idempotencyKey } = req.body
 
     if (!fromAccount || !toAccount || !amount || !idempotencyKey) {
@@ -28,8 +31,43 @@ async function createTransaction(req, res) {
         })
     }
 
+    /**
+     * 2. Validate idempotency key
+     */
+    const isTransactionAlreadyExists = await transactionModel.findOne({
+        idempotencyKey: idempotencyKey
+    })
+
+    if (isTransactionAlreadyExists) {
+
+        if (isTransactionAlreadyExists.status === "COMPLETED") {
+            return res.status(200).json({
+                message: "Transaction already processed",
+                transaction: isTransactionAlreadyExists
+            })
+        }
+
+        if (isTransactionAlreadyExists.status === "PENDING") {
+            return res.status(200).json({
+                message: "Transaction is still processing"
+            })
+        }
+
+        if (isTransactionAlreadyExists.status === "FAILED") {
+            return res.status(500).json({
+                message: "Transaction processing failed, please retry"
+            })
+        }
+
+        if (isTransactionAlreadyExists.status === "REVERSED") {
+            return res.status(500).json({
+                message: "Transaction was reversed, please retry"
+            })
+        }
+    }
+
     return res.status(200).json({
-        message: "Transaction request validated successfully"
+        message: "Transaction request and idempotency key validated successfully"
     })
 }
 
