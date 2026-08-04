@@ -1,9 +1,7 @@
 const transactionModel = require("../models/transaction.model")
 const accountModel = require("../models/account.model")
+const mongoose = require("mongoose")
 
-/**
- * Create a new transaction
- */
 async function createTransaction(req, res) {
 
     /**
@@ -89,9 +87,44 @@ async function createTransaction(req, res) {
         })
     }
 
-    return res.status(200).json({
-        message: "Transaction validation completed successfully",
-        balance
+    let transaction
+
+    try {
+
+        /**
+         * 5. Start MongoDB session
+         */
+        const session = await mongoose.startSession()
+
+        session.startTransaction()
+
+        /**
+         * 6. Create PENDING transaction
+         */
+        transaction = (await transactionModel.create([
+            {
+                fromAccount,
+                toAccount,
+                amount,
+                idempotencyKey,
+                status: "PENDING"
+            }
+        ], { session }))[0]
+
+        await session.commitTransaction()
+
+        session.endSession()
+
+    } catch (error) {
+
+        return res.status(400).json({
+            message: "Transaction is Pending due to some issue, please retry after sometime"
+        })
+    }
+
+    return res.status(201).json({
+        message: "Transaction created successfully",
+        transaction: transaction
     })
 }
 
